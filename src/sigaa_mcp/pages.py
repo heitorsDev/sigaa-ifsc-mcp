@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import re
 import unicodedata
 from urllib.parse import urljoin
 
@@ -196,6 +198,72 @@ def build_form(
         values[chosen[0]] = chosen[1]
         changed["(botão)"] = chosen[1]
     return Form(urljoin(page.url, f.get("action") or page.url), values), file_names, changed
+
+
+# ---- menu do portal (JSCookMenu) --------------------------------------------
+
+# Itens do array JS do menu: [ícone, 'rótulo', 'ação', alvo, ...]. A ação tem a
+# forma '<menu>:A]#{ bean.metodo }' (ação JSF) ou '<menu>:L]...' (link legado).
+_MENU_ITEM = re.compile(
+    r"\[\s*(?:null|'[^']*'|\"[^\"]*\")\s*,\s*'((?:[^'\\]|\\.)*)'\s*,\s*'((?:[^'\\]|\\.)*)'"
+)
+
+
+def portal_menu(page: Page) -> list[dict]:
+    """Itens do menu superior do portal do discente (Ensino, Pesquisa...)."""
+    items: dict[tuple[str, str], dict] = {}
+    for script in page.soup.find_all("script"):
+        js = script.string or script.get_text()
+        if "cmDraw" not in js and "A]" not in js:
+            continue
+        for label, action in _MENU_ITEM.findall(js):
+            action = action.replace("\\'", "'")
+            if ":A]" not in action and ":L]" not in action:
+                continue
+            text = clean(BeautifulSoup(html.unescape(label.replace("\\'", "'")), "html.parser").get_text())
+            if text:
+                items.setdefault((text, action), {"texto": text, "acao": action})
+    return list(items.values())
+
+
+def find_menu_item(page: Page, query: str) -> dict:
+    """Acha um item do menu pelo texto ou por um trecho da ação
+    (ex.: 'verComprovanteSolicitacoes')."""
+    items = portal_menu(page)
+    if not items:
+        raise SigaaError("Não encontrei o menu do portal nesta página.")
+    q = norm(query)
+    for match in (
+        lambda i: norm(i["texto"]) == q,
+        lambda i: query in i["acao"],
+        lambda i: norm(i["texto"]).startswith(q),
+        lambda i: q in norm(i["texto"]),
+    ):
+        found = [i for i in items if match(i)]
+        if found:
+            return found[0]
+    raise SigaaError(f'Item de menu "{query}" não encontrado. Use menu_portal para listar os itens.')
+
+
+def menu_form(page: Page, action: str) -> Form:
+    """POST que o JSCookMenu faz ao clicar num item: campos do formulário do
+    menu + jscook_action."""
+    soup = page.soup
+    f = soup.find("form", id=re.compile("form_menu_discente")) or next(
+        (f for f in soup.find_all("form") if f.find("input", attrs={"name": "jscook_action"})), None
+    )
+    if f is None or not f.get("action"):
+        raise SigaaError("Formulário do menu do portal não encontrado.")
+    values = {
+        i["name"]: i.get("value", "")
+        for i in f.find_all("input")
+        if i.get("name") and (i.get("type") or "text").lower() not in ("submit", "button", "image")
+    }
+    form_id = f.get("id") or f.get("name") or ""
+    if form_id:
+        values[form_id] = form_id
+    values["jscook_action"] = action
+    return Form(urljoin(page.url, f["action"]), values)
 
 
 def messages(page: Page) -> dict:
