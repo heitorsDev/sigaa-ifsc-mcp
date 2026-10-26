@@ -9,6 +9,7 @@ import mimetypes
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
@@ -16,7 +17,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import Error as PlaywrightError
 
-from . import courses, documents, pages, parsers
+from . import courses, documents, pages, parsers, schedule
 from .browser_login import capture_jsessionid
 from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, SigaaError
 
@@ -218,6 +219,58 @@ async def declaracao_vinculo() -> str:
     """Declaração de vínculo: salva o documento e devolve o texto."""
     return await _menu_result("declaracaoVinculo.emitirDeclaracao")
 
+
+@tool
+async def grade_horarios(data: str = "") -> str:
+    """Grade de horários da semana (padrão: semana atual; ou `data` dd/mm/aaaa),
+    montada a partir do comprovante de matrícula: aulas por dia com horário,
+    disciplina e sala. Também lista os padrões de horário de cada turma, já que
+    turmas de horário flexível mudam de padrão ao longo do semestre."""
+    try:
+        on = datetime.strptime(data, "%d/%m/%Y").date() if data else date.today()
+    except ValueError:
+        return "Use a data no formato dd/mm/aaaa."
+
+    source = "comprovante de matrícula"
+    try:
+        _, result = await _open_menu("verComprovanteSolicitacoes")
+        if isinstance(result, tuple):
+            raise SigaaError("O comprovante veio como arquivo.")
+        info = schedule.parse_enrollment(result)
+        slots = schedule.parse_slot_times(result)
+        if not info["turmas"]:
+            raise SigaaError("Comprovante sem turmas.")
+    except SigaaError:
+        # Fora do período de matrícula o comprovante pode não existir; a lista
+        # de turmas também traz os códigos de horário.
+        source = "lista de turmas (sem salas)"
+        listed = await courses.list_courses(client)
+        info = {
+            "periodo": listed[0]["periodo"] if listed else "",
+            "turmas": [
+                {
+                    "codigo": c["codigo"],
+                    "nome": c["nome"],
+                    "turma": c["turma"],
+                    "local": "",
+                    "situacao": "",
+                    "padroes": schedule.parse_patterns(c["horario"]),
+                }
+                for c in listed
+            ],
+        }
+        slots = schedule.DEFAULT_SLOTS
+
+    return _json(
+        {
+            "fonte": source,
+            "periodo": info.get("periodo", ""),
+            "semana_de": on.strftime("%d/%m/%Y"),
+            "grade": schedule.week_grid(info["turmas"], slots, on),
+            "horarios_das_aulas": slots,
+            "turmas": info["turmas"],
+        }
+    )
 
 
 # ---- turma virtual --------------------------------------------------------
