@@ -338,6 +338,28 @@ def parse_exam_calendar(page: Page) -> list[dict]:
     return []
 
 
+def parse_files(page: Page) -> list[dict]:
+    """Seção 'Arquivos' da turma: título, descrição e o formulário de download
+    (com `id` e `key`, que também servem para /sigaa/verFoto)."""
+    out = []
+    for tr in page.soup.select(".listing tr[class]"):
+        cells = tr.find_all("td", recursive=False)
+        if not cells:
+            continue
+        link = next((a for c in cells[1:] for a in c.find_all("a", onclick=True)), None)
+        form = _onclick_form(page, link)
+        out.append(
+            {
+                "titulo": clean(cells[0]),
+                "descricao": clean(cells[1]) if len(cells) > 1 else "",
+                "id": form.values.get("id") if form else None,
+                "key": form.values.get("key") if form else None,
+                "form": form,
+            }
+        )
+    return out
+
+
 def strip_forms(items: list[dict]) -> list[dict]:
     """Remove os formulários internos antes de devolver ao cliente MCP."""
     return [{k: v for k, v in i.items() if k != "form"} for i in items]
