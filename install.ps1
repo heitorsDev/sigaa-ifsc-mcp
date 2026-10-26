@@ -48,7 +48,18 @@
         if ($LASTEXITCODE -ne 0) { Warn 'Falha ao baixar o Chromium.' }
     }
 
-    # 4. clientes MCP
+    # 4. Moodle
+    if (-not $env:SIGAA_SKIP_MOODLE) {
+        $answer = Read-Host 'Configurar o login do Moodle agora? [S/n]'
+        if ($answer -match '^[nN]') {
+            Info "Moodle pulado; depois rode: & '$bin' moodle-login"
+        } else {
+            & $bin moodle-login
+            if ($LASTEXITCODE -ne 0) { Warn "Login do Moodle falhou; rode depois: & '$bin' moodle-login" }
+        }
+    }
+
+    # 5. clientes MCP
     $registered = $false
 
     if (Have 'claude') {
@@ -83,7 +94,7 @@
         Warn 'Reinicie o Claude Desktop para carregar o servidor.'
     }
 
-    # 5. fim
+    # 6. fim
     Write-Host ''
     Info "Pronto! Executável: $bin"
     if (-not $registered) {
