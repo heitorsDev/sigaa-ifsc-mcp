@@ -156,16 +156,44 @@ token (em `~/.sigaa-mcp/moodle.json`). Para refazer o login:
 sigaa-mcp moodle-login
 ```
 
+Os cursos de antes de 2026 ficam em outro site (`moodle4.ifsc.edu.br`). Para
+acessá-los, rode `sigaa-mcp moodle-login --antigo` e use `site="antigo"` nas
+ferramentas.
+
+Os cursos do Moodle são criados a partir das turmas do SIGAA: o `idnumber` é
+`COMPONENTE<id da turma>` e o nome curto começa com o código do componente.
+`moodle_cursos` devolve esses dois campos, e `curso` aceita o código do
+componente (ex.: `CAB22402`).
+
 | Ferramenta | O que faz |
 |---|---|
 | `moodle_status()` | Verifica o token |
-| `moodle_cursos()` | Cursos inscritos, com progresso |
-| `moodle_conteudo(curso)` | Seções, atividades, recursos e arquivos do curso |
-| `moodle_prazos(dias)` | Próximos prazos em todos os cursos |
-| `moodle_tarefas(curso)` | Tarefas com prazo e enunciado; com `curso`, status da entrega e nota |
-| `moodle_notas(curso)` | Itens de nota com nota, porcentagem e feedback |
-| `moodle_baixar_arquivo(curso, arquivo, pasta)` | Baixa um arquivo do curso (PDFs voltam com o texto) |
+| `moodle_cursos(classificacao)` | Cursos (todos, em andamento, passados, futuros) com progresso e ligação ao SIGAA |
+| `moodle_buscar_cursos(texto)` | Busca cursos de todo o IFSC pelo nome |
+| `moodle_conteudo(curso)` | Seções e itens do curso, com arquivos e links embutidos |
+| `moodle_materiais(curso, tipo)` | Todos os materiais numa lista: arquivos e links (YouTube, Drive, PDFs) de páginas, pastas e rótulos |
+| `moodle_buscar_material(texto, curso)` | Busca nos nomes, textos e links dos materiais |
+| `moodle_ler_item(curso, item)` | Texto de página, rótulo ou pasta (com TeX); PDF baixado e lido |
+| `moodle_baixar_arquivo(curso, arquivo, pasta)` | Baixa um arquivo (PDFs voltam com o texto) |
+| `moodle_baixar_curso(curso, pasta, limite_mb)` | Baixa todos os arquivos do curso, por seção |
+| `moodle_prazos(dias, incluir_atrasados)` | Prazos atrasados e próximos de todos os cursos |
+| `moodle_calendario(mes, ano)` | Eventos do calendário no mês |
+| `moodle_notas(curso)` | Sem curso: nota de cada curso. Com curso: itens com peso, nota, %, média e feedback |
+| `moodle_tarefas(curso)` / `moodle_tarefa(curso, tarefa)` | Tarefas, regras de envio, status, nota e comentários |
+| `moodle_enviar_tarefa(curso, tarefa, arquivos, texto, finalizar, confirmar)` | Entrega com arquivos e/ou texto; `finalizar` envia para avaliação |
+| `moodle_questionarios(curso)` | Questionários, tentativas e melhor nota (não inicia tentativas) |
+| `moodle_foruns(curso)` / `moodle_topicos(curso, forum)` / `moodle_posts(topico_id)` | Fóruns, tópicos e mensagens |
+| `moodle_avisos()` | Avisos de todos os cursos em andamento |
+| `moodle_postar_forum(...)` / `moodle_responder_forum(...)` | Cria tópico ou responde, com `confirmar` |
+| `moodle_mensagens()` / `moodle_conversa(id)` | Conversas e mensagens (não marca como lidas) |
+| `moodle_enviar_mensagem(conversa_id, texto, confirmar)` | Envia mensagem numa conversa |
+| `moodle_notificacoes()` | Notificações recentes |
+| `moodle_progresso(curso)` / `moodle_emblemas()` | Conclusão de atividades e emblemas |
 | `moodle_api(funcao, parametros)` | Chama uma função de leitura da API do Moodle |
+
+Todas aceitam `site` (`"atual"` ou `"antigo"`). Entregar tarefa, postar em
+fórum e mandar mensagem só acontecem com `confirmar=true`; antes disso a
+ferramenta devolve uma prévia para você aprovar.
 
 ### Envios
 
@@ -184,6 +212,7 @@ navegação genérica (`formularios_pagina` + `enviar_formulario`) cobre o caso.
 |---|---|---|
 | `MOODLE_URL` | `https://moodle.ifsc.edu.br` | Endereço do Moodle |
 | `MOODLE_TOKEN` | | Token da API do Moodle (tem prioridade sobre o arquivo salvo) |
+| `MOODLE_LEGACY_URL` | `https://moodle4.ifsc.edu.br` | Moodle com os cursos anteriores a 2026 |
 | `SIGAA_SKIP_MOODLE` | | No instalador, não pergunta o login do Moodle |
 | `SIGAA_AUTO_LOGIN` | `1` | Abre a janela de login quando a sessão expira; `0` desativa |
 | `SIGAA_JSESSIONID` | | Cookie de sessão (tem prioridade sobre o arquivo salvo) |
