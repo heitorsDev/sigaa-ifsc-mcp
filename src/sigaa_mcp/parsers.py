@@ -315,6 +315,7 @@ def parse_homeworks(page: Page) -> list[dict]:
                     "pode_enviar": len(cells) > 5 and cells[5].find(onclick=True) is not None,
                     "enviada": len(cells) > 6 and cells[6].find(onclick=True) is not None,
                     "descricao": "\n".join(lines(desc)) if desc else "",
+                    "form": _onclick_form(page, cells[5]) if len(cells) > 5 else None,
                 }
             )
     return out
