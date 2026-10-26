@@ -5,22 +5,26 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import mimetypes
 import os
 import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import Error as PlaywrightError
 
-from . import courses, parsers
+from . import courses, pages, parsers
 from .browser_login import capture_jsessionid
 from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, SigaaError
 
 KEEPALIVE_MIN = float(os.environ.get("SIGAA_KEEPALIVE_MIN", "10"))
 MAX_CHARS = int(os.environ.get("SIGAA_MAX_CHARS", "20000"))
 AUTO_LOGIN = os.environ.get("SIGAA_AUTO_LOGIN", "1") != "0"
+DOWNLOAD_DIR = Path(os.environ.get("SIGAA_DOWNLOAD_DIR", Path.home() / "Downloads" / "SIGAA")).expanduser()
+MAX_UPLOAD_MB = float(os.environ.get("SIGAA_MAX_UPLOAD_MB", "50"))
 
 client = SigaaClient()
 
@@ -181,7 +185,7 @@ async def tarefas(turma: str) -> str:
     """Tarefas de uma turma: título, período de entrega, se vale nota, se já
     foi enviada e descrição."""
     course, page = await courses.open_section(client, turma, "Tarefas")
-    return _json({"turma": f'{course["codigo"]} - {course["nome"]}', "tarefas": parsers.parse_homeworks(page)})
+    return _json({"turma": f'{course["codigo"]} - {course["nome"]}', "tarefas": parsers.strip_forms(parsers.parse_homeworks(page))})
 
 
 @tool
@@ -238,6 +242,225 @@ async def abrir_pagina(caminho: str = PORTAL_PATH) -> str:
         return f"Só é permitido acessar {HOST}."
     page = await client.get(url)
     return f"URL: {page.url}\n\n" + parsers.page_text(page, MAX_CHARS)
+
+
+# ---- arquivos ---------------------------------------------------------------
+
+
+def _save(name: str, data: bytes, ctype: str, folder: Path) -> Path:
+    """Salva o arquivo sem sobrescrever outro de mesmo nome."""
+    folder.mkdir(parents=True, exist_ok=True)
+    name = Path(name).name or "arquivo"
+    if not Path(name).suffix:
+        name += mimetypes.guess_extension(ctype.split(";")[0].strip()) or ""
+    path = folder / name
+    n = 1
+    while path.exists():
+        path = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
+        n += 1
+    path.write_bytes(data)
+    return path
+
+
+def _saved(path: Path, ctype: str) -> str:
+    return _json({"arquivo": str(path), "tamanho_bytes": path.stat().st_size, "tipo": ctype})
+
+
+@tool
+async def arquivos(turma: str) -> str:
+    """Arquivos publicados na seção 'Arquivos' de uma turma (título e descrição)."""
+    course, page = await courses.open_section(client, turma, "Arquivos")
+    files = [{k: v for k, v in f.items() if k not in ("form", "key")} for f in parsers.parse_files(page)]
+    return _json({"turma": f'{course["codigo"]} - {course["nome"]}', "arquivos": files})
+
+
+@tool
+async def baixar_arquivo(turma: str, arquivo: str, pasta: str = "") -> str:
+    """Baixa um arquivo da seção 'Arquivos' de uma turma (pelo título, trecho
+    dele ou id) e salva no computador. Padrão: ~/Downloads/SIGAA/<código da turma>.
+    Retorna o caminho do arquivo salvo."""
+    course, page = await courses.open_section(client, turma, "Arquivos")
+    files = parsers.parse_files(page)
+    q = pages.norm(arquivo)
+    found = [f for f in files if f["id"] == arquivo or pages.norm(f["titulo"]) == q] or [
+        f for f in files if q in pages.norm(f["titulo"])
+    ]
+    if not found:
+        names = "; ".join(f["titulo"] for f in files) or "nenhum"
+        raise SigaaError(f'Arquivo "{arquivo}" não encontrado. Arquivos: {names}.')
+    f = found[0]
+    if f["id"] and f["key"]:
+        name, data, ctype = await client.download(f"/sigaa/verFoto?idArquivo={f['id']}&key={f['key']}")
+    elif f["form"]:
+        name, data, ctype = await client.download(form=f["form"])
+    else:
+        raise SigaaError("Este arquivo não tem link de download.")
+    if name == "arquivo":
+        name = f["titulo"]
+    folder = Path(pasta).expanduser() if pasta else DOWNLOAD_DIR / course["codigo"]
+    return _saved(_save(name, data, ctype, folder), ctype)
+
+
+# ---- navegação genérica -----------------------------------------------------
+
+
+def _current():
+    if client.current is None:
+        raise SigaaError("Nenhuma página aberta. Use abrir_pagina, secao_turma ou outra ferramenta antes.")
+    return client.current
+
+
+@tool
+async def pagina_atual() -> str:
+    """Texto da última página do SIGAA aberta por qualquer ferramenta."""
+    page = _current()
+    return f"URL: {page.url}\n\n" + parsers.page_text(page, MAX_CHARS)
+
+
+@tool
+async def links_pagina(filtro: str = "") -> str:
+    """Links da página atual, com índice para usar em `clicar`. Links JSF (que
+    o SIGAA usa para quase tudo) também aparecem. `filtro` filtra pelo texto."""
+    q = pages.norm(filtro)
+    rows = [
+        f'[{link["indice"]}] {link["texto"]}'
+        for link in pages.links(_current())
+        if not q or q in pages.norm(link["texto"])
+    ]
+    return "\n".join(rows) or "Nenhum link encontrado."
+
+
+@tool
+async def clicar(texto: str = "", indice: int = -1) -> str:
+    """Segue um link da página atual, pelo texto (trecho, sem acentos) ou pelo
+    índice de `links_pagina`. Se o link for um arquivo, ele é salvo em
+    ~/Downloads/SIGAA e o caminho é retornado."""
+    if indice < 0 and not texto:
+        return "Informe `texto` ou `indice`."
+    link = pages.find_link(_current(), texto, indice)
+    result = await client.fetch(link["url"] or "", link["form"])
+    if isinstance(result, tuple):
+        name, data, ctype = result
+        return _saved(_save(name, data, ctype, DOWNLOAD_DIR), ctype)
+    return f'Clicado: "{link["texto"]}"\nURL: {result.url}\n\n' + parsers.page_text(result, MAX_CHARS)
+
+
+@tool
+async def formularios_pagina() -> str:
+    """Formulários da página atual: id, campos (nome, rótulo, tipo, valor,
+    opções), campos de arquivo e botões. Use com `enviar_formulario`."""
+    return _json(pages.forms(_current()))
+
+
+def _read_upload(path_str: str) -> tuple[str, bytes, str]:
+    path = Path(path_str).expanduser()
+    if not path.is_file():
+        raise SigaaError(f"Arquivo não encontrado: {path}")
+    size = path.stat().st_size
+    if size > MAX_UPLOAD_MB * 1024 * 1024:
+        raise SigaaError(f"{path.name} tem {size / 1e6:.1f} MB; o limite configurado é {MAX_UPLOAD_MB:g} MB.")
+    ctype = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    return path.name, path.read_bytes(), ctype
+
+
+async def _submit(page, form_id: str, campos: dict, arquivos: dict, botao: str, confirmar: bool) -> str:
+    form, file_names, changed = pages.build_form(page, form_id, campos, botao or None)
+    uploads: dict[str, tuple[str, bytes, str]] = {}
+    for key, path in arquivos.items():
+        if key in file_names:
+            name = key
+        elif len(file_names) == 1:
+            name = file_names[0]
+        else:
+            raise SigaaError(f'Campo de arquivo "{key}" não existe. Campos: {", ".join(file_names) or "nenhum"}.')
+        uploads[name] = _read_upload(path)
+
+    if not confirmar:
+        return _json(
+            {
+                "previa": True,
+                "aviso": (
+                    "NADA FOI ENVIADO. Mostre este resumo ao usuário e só chame de novo com "
+                    "confirmar=true depois que ele aprovar explicitamente."
+                ),
+                "formulario": form_id,
+                "pagina": page.url,
+                "campos_alterados": changed,
+                "arquivos": {k: f"{v[0]} ({len(v[1])} bytes)" for k, v in uploads.items()},
+            }
+        )
+
+    multipart = bool(uploads) or any(f["id"] == form_id and f["multipart"] for f in pages.forms(page))
+    if multipart:
+        # Campos de arquivo sem arquivo vão vazios, como num navegador.
+        for name in file_names:
+            uploads.setdefault(name, ("", b"", "application/octet-stream"))
+        result = await client.post_multipart(form, uploads)
+    else:
+        result = await client.post(form)
+    return _json(pages.messages(result)) + "\n\n" + parsers.page_text(result, MAX_CHARS)
+
+
+@tool
+async def enviar_formulario(
+    formulario: str,
+    campos: dict[str, str] | None = None,
+    arquivos: dict[str, str] | None = None,
+    botao: str = "",
+    confirmar: bool = False,
+) -> str:
+    """Preenche e envia um formulário da página atual (veja `formularios_pagina`).
+
+    - `campos`: {nome ou rótulo do campo: valor}; checkbox aceita true/false.
+    - `arquivos`: {nome do campo de arquivo: caminho local}.
+    - `botao`: nome ou texto do botão (padrão: o primeiro).
+    - Com `confirmar=false` (padrão) só mostra uma prévia e NÃO envia nada.
+      Só use `confirmar=true` depois que o usuário aprovar o envio.
+    Retorna as mensagens de sucesso/erro do SIGAA e a página resultante."""
+    return await _submit(_current(), formulario, campos or {}, arquivos or {}, botao, confirmar)
+
+
+@tool
+async def enviar_tarefa(
+    turma: str, tarefa: str, arquivo: str = "", comentario: str = "", confirmar: bool = False
+) -> str:
+    """Entrega uma tarefa da turma, com arquivo (caminho local) e/ou comentário.
+
+    Com `confirmar=false` (padrão) abre o formulário de envio e mostra uma
+    prévia, sem enviar nada. Só use `confirmar=true` depois que o usuário
+    aprovar a entrega."""
+    course, page = await courses.open_section(client, turma, "Tarefas")
+    tasks = parsers.parse_homeworks(page)
+    q = pages.norm(tarefa)
+    found = [t for t in tasks if pages.norm(t["titulo"]) == q] or [t for t in tasks if q in pages.norm(t["titulo"])]
+    if not found:
+        names = "; ".join(t["titulo"] for t in tasks) or "nenhuma"
+        raise SigaaError(f'Tarefa "{tarefa}" não encontrada. Tarefas: {names}.')
+    task = found[0]
+    if task["form"] is None:
+        raise SigaaError(f'A tarefa "{task["titulo"]}" não está aberta para envio.')
+    send_page = await client.post(task["form"])
+
+    candidates = [
+        f for f in pages.forms(send_page) if f["arquivos"] or any(c["tipo"] == "textarea" for c in f["campos"])
+    ]
+    if not candidates:
+        raise SigaaError("Não achei o formulário de envio na página da tarefa. Use formularios_pagina para inspecionar.")
+    target = candidates[0]
+    campos = {}
+    if comentario:
+        area = next((c for c in target["campos"] if c["tipo"] == "textarea"), None)
+        if area is None:
+            raise SigaaError("O formulário desta tarefa não tem campo de comentário.")
+        campos[area["nome"]] = comentario
+    uploads = {}
+    if arquivo:
+        if not target["arquivos"]:
+            raise SigaaError("O formulário desta tarefa não aceita arquivo.")
+        uploads[target["arquivos"][0]["nome"]] = arquivo
+    botao = next((b["texto"] for b in target["botoes"] if "enviar" in pages.norm(b["texto"])), "")
+    header = f'Turma: {course["codigo"]} - {course["nome"]}\nTarefa: {task["titulo"]} ({task["periodo"]})\n'
+    return header + await _submit(send_page, target["id"], campos, uploads, botao, confirmar)
 
 
 # ---- CLI ------------------------------------------------------------------
