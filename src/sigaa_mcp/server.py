@@ -12,6 +12,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 from mcp.server.fastmcp import FastMCP
+from playwright.async_api import Error as PlaywrightError
 
 from . import courses, parsers
 from .browser_login import capture_jsessionid
@@ -19,14 +20,13 @@ from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, Si
 
 KEEPALIVE_MIN = float(os.environ.get("SIGAA_KEEPALIVE_MIN", "10"))
 MAX_CHARS = int(os.environ.get("SIGAA_MAX_CHARS", "20000"))
+AUTO_LOGIN = os.environ.get("SIGAA_AUTO_LOGIN", "1") != "0"
 
 client = SigaaClient()
 
 HOW_TO_LOGIN = (
-    "Para reconectar: entre em https://sig.ifsc.edu.br/sigaa no navegador, abra as "
-    "ferramentas de desenvolvedor (F12) > Application/Armazenamento > Cookies > "
-    "sig.ifsc.edu.br, copie o valor de JSESSIONID e chame `definir_cookie` com ele. "
-    "Ou chame `login_navegador` para fazer o login numa janela e capturar o cookie."
+    "Para reconectar, chame `login_navegador` (abre uma janela para o usuário entrar "
+    "no SIGAA) ou `definir_cookie` com o JSESSIONID de um login feito no navegador."
 )
 
 
@@ -54,28 +54,56 @@ def _json(data) -> str:
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
-def tool(fn):
-    """Registra a ferramenta, serializa o acesso ao SIGAA e traduz erros."""
+async def _login_via_browser() -> str:
+    """Abre a janela de login, espera o usuário entrar e salva o cookie.
+    Retorna o nome do aluno logado."""
+    try:
+        cookie = await capture_jsessionid()
+    except PlaywrightError as e:
+        raise SessionExpired(
+            f"Não foi possível abrir o navegador ({e}). Fora do Windows, rode "
+            "`uvx --from playwright playwright install chromium`."
+        ) from e
+    if not cookie:
+        raise SessionExpired("Login não concluído (janela fechada ou tempo esgotado).")
+    page = await client.set_cookie(cookie)
+    return parsers.parse_profile(page).get("nome") or "?"
 
-    @functools.wraps(fn)
-    async def wrapper(*args, **kwargs):
-        async with client.lock:
-            try:
-                return await fn(*args, **kwargs)
-            except SessionExpired as e:
-                return f"{e} {HOW_TO_LOGIN}"
-            except SigaaError as e:
-                return str(e)
-            except httpx.HTTPError as e:
-                return f"Erro de rede ao acessar o SIGAA: {e!r}"
 
-    return mcp.tool()(wrapper)
+def tool(fn=None, *, auto_login: bool = True):
+    """Registra a ferramenta, serializa o acesso ao SIGAA e traduz erros.
+
+    Com `auto_login`, uma sessão expirada abre a janela de login e, depois que
+    o usuário entra, a ferramenta é executada de novo."""
+
+    def decorate(fn):
+        @functools.wraps(fn)
+        async def wrapper(*args, **kwargs):
+            async with client.lock:
+                try:
+                    try:
+                        return await fn(*args, **kwargs)
+                    except SessionExpired:
+                        if not (auto_login and AUTO_LOGIN):
+                            raise
+                        await _login_via_browser()
+                        return await fn(*args, **kwargs)
+                except SessionExpired as e:
+                    return f"{e} {HOW_TO_LOGIN}"
+                except SigaaError as e:
+                    return str(e)
+                except httpx.HTTPError as e:
+                    return f"Erro de rede ao acessar o SIGAA: {e!r}"
+
+        return mcp.tool()(wrapper)
+
+    return decorate(fn) if fn else decorate
 
 
 # ---- sessão ---------------------------------------------------------------
 
 
-@tool
+@tool(auto_login=False)
 async def definir_cookie(cookie: str) -> str:
     """Configura a sessão do SIGAA a partir do cookie JSESSIONID de um login feito
     pelo usuário no navegador. Aceita só o valor ou 'JSESSIONID=valor'."""
@@ -84,18 +112,14 @@ async def definir_cookie(cookie: str) -> str:
     return f"Sessão válida e salva. Logado como {profile.get('nome') or '?'}."
 
 
-@tool
+@tool(auto_login=False)
 async def login_navegador() -> str:
     """Abre uma janela do navegador na tela de login do SIGAA. O usuário faz o
     login (com o CAPTCHA) e o cookie da sessão é capturado automaticamente."""
-    cookie = await capture_jsessionid()
-    if not cookie:
-        return "Login não concluído (janela fechada ou tempo esgotado)."
-    page = await client.set_cookie(cookie)
-    return f"Sessão capturada e salva. Logado como {parsers.parse_profile(page).get('nome') or '?'}."
+    return f"Sessão capturada e salva. Logado como {await _login_via_browser()}."
 
 
-@tool
+@tool(auto_login=False)
 async def status() -> str:
     """Verifica se a sessão do SIGAA é válida e mostra o aluno logado."""
     profile = parsers.parse_profile(await client.get(PORTAL_PATH))
@@ -103,7 +127,7 @@ async def status() -> str:
     return f"Sessão válida: {profile.get('nome') or '?'} ({profile.get('periodo_atual') or '?'}). Keepalive {keepalive}."
 
 
-@tool
+@tool(auto_login=False)
 async def esquecer_sessao() -> str:
     """Apaga o cookie de sessão salvo neste computador."""
     client.clear()
