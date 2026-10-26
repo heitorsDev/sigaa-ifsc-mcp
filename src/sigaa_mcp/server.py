@@ -14,6 +14,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 
 from . import courses, parsers
+from .browser_login import capture_jsessionid
 from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, SigaaError
 
 KEEPALIVE_MIN = float(os.environ.get("SIGAA_KEEPALIVE_MIN", "10"))
@@ -86,15 +87,7 @@ async def definir_cookie(cookie: str) -> str:
 @tool
 async def login_navegador() -> str:
     """Abre uma janela do navegador na tela de login do SIGAA. O usuário faz o
-    login (com o CAPTCHA) e o cookie da sessão é capturado automaticamente.
-    Requer o extra opcional `browser` (Playwright)."""
-    try:
-        from .browser_login import capture_jsessionid
-    except ImportError:
-        return (
-            "O login por janela precisa do Playwright. Instale com o extra `browser` "
-            "(ex.: `uvx --from 'sigaa-ifsc-mcp[browser]' ...`) ou use `definir_cookie`."
-        )
+    login (com o CAPTCHA) e o cookie da sessão é capturado automaticamente."""
     cookie = await capture_jsessionid()
     if not cookie:
         return "Login não concluído (janela fechada ou tempo esgotado)."
@@ -235,8 +228,6 @@ async def _cli_cookie(value: str) -> None:
 
 
 async def _cli_login() -> None:
-    from .browser_login import capture_jsessionid
-
     cookie = await capture_jsessionid()
     if not cookie:
         print("Login não concluído.")
@@ -263,7 +254,7 @@ USAGE = """uso: sigaa-mcp [comando]
 
   (sem comando)     roda o servidor MCP (stdio)
   cookie <valor>    salva o JSESSIONID de um login feito no navegador
-  login             abre o navegador para logar e captura o cookie (extra `browser`)
+  login             abre o navegador para logar e captura o cookie
   keepalive         mantém a sessão salva ativa enquanto estiver rodando
 """
 
