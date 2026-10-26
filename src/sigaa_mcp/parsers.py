@@ -6,6 +6,7 @@ Seletores e regras portados de sigaa-api (GeovaneSchmitz/sigaa-api, MIT).
 from __future__ import annotations
 
 import re
+from urllib.parse import urljoin
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 
@@ -160,17 +161,52 @@ def parse_courses(page: Page, all_periods: bool = False) -> list[dict]:
 # ---- turma virtual --------------------------------------------------------
 
 
+def _rich_menu_form(page: Page, item: Tag) -> Form | None:
+    """Item de menu RichFaces (div.rich-menu-item, RichFaces.Menu.submitForm):
+    POST com os campos do formulário + `<id do item>=<id do item>`."""
+    form_el = item.find_parent("form")
+    item_id = item.get("id", "")
+    if form_el is None or not item_id or not form_el.get("action"):
+        return None
+    values = {
+        i["name"]: i.get("value", "")
+        for i in form_el.find_all("input")
+        if i.get("name") and i.get("type") != "submit"
+    }
+    form_name = form_el.get("id") or form_el.get("name") or ""
+    if form_name:
+        values.setdefault(form_name, form_name)
+    params = re.findall(r"'([^']+)'\s*:\s*'([^']*)'", item.get("onclick", ""))
+    values.update(params or [(item_id, item_id)])
+    return Form(urljoin(page.url, form_el["action"]), values)
+
+
 def course_menu(page: Page) -> dict[str, Form]:
-    """Itens do menu lateral da turma virtual (div.itemMenu) -> formulário."""
+    """Itens do menu da turma virtual -> formulário. O SIGAA do IFSC usa dois
+    layouts: a barra lateral (#formMenu, links JSF; div.itemMenu nas versões
+    antigas) e o menu suspenso RichFaces (#formMenuDrop, div.rich-menu-item)."""
     items: dict[str, Form] = {}
-    for div in page.soup.select("div.itemMenu"):
-        label = clean(div)
+    soup = page.soup
+    for div in soup.select("div.itemMenu"):
         parent = div.parent
+        label = clean(div)
         if label and parent is not None and parent.get("onclick"):
             try:
                 items.setdefault(label, page.parse_jsfcljs(parent["onclick"]))
             except SigaaError:
                 pass
+    for a in soup.select('#formMenu a[onclick*="jsfcljs"]'):
+        label = clean(a)
+        if label:
+            try:
+                items.setdefault(label, page.parse_jsfcljs(a["onclick"]))
+            except SigaaError:
+                pass
+    for div in soup.select("div.rich-menu-item"):
+        label = clean(div)
+        form = _rich_menu_form(page, div) if label else None
+        if form is not None:
+            items.setdefault(label, form)
     return items
 
 
