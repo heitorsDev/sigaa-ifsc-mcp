@@ -16,7 +16,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import Error as PlaywrightError
 
-from . import courses, pages, parsers
+from . import courses, documents, pages, parsers
 from .browser_login import capture_jsessionid
 from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, SigaaError
 
@@ -247,23 +247,15 @@ async def abrir_pagina(caminho: str = PORTAL_PATH) -> str:
 # ---- arquivos ---------------------------------------------------------------
 
 
-def _save(name: str, data: bytes, ctype: str, folder: Path) -> Path:
-    """Salva o arquivo sem sobrescrever outro de mesmo nome."""
-    folder.mkdir(parents=True, exist_ok=True)
-    name = Path(name).name or "arquivo"
-    if not Path(name).suffix:
-        name += mimetypes.guess_extension(ctype.split(";")[0].strip()) or ""
-    path = folder / name
-    n = 1
-    while path.exists():
-        path = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
-        n += 1
-    path.write_bytes(data)
-    return path
+def _file_result(name: str, data: bytes, ctype: str, folder: Path) -> str:
+    """Salva o arquivo e, se for PDF, devolve também o texto dele."""
+    path = documents.save(name, data, ctype, folder)
+    info = _json({"arquivo": str(path), "tamanho_bytes": len(data), "tipo": ctype})
+    if documents.is_pdf(data, ctype):
+        info += "
 
-
-def _saved(path: Path, ctype: str) -> str:
-    return _json({"arquivo": str(path), "tamanho_bytes": path.stat().st_size, "tipo": ctype})
+" + documents.pdf_text(data, MAX_CHARS)
+    return info
 
 
 @tool
@@ -334,7 +326,7 @@ async def baixar_arquivo(turma: str, arquivo: str, pasta: str = "") -> str:
     if name == "arquivo":
         name = f["titulo"]
     folder = Path(pasta).expanduser() if pasta else DOWNLOAD_DIR / course["codigo"]
-    return _saved(_save(name, data, ctype, folder), ctype)
+    return _file_result(name, data, ctype, folder)
 
 
 # ---- navegação genérica -----------------------------------------------------
@@ -377,7 +369,7 @@ async def clicar(texto: str = "", indice: int = -1) -> str:
     result = await client.fetch(link["url"] or "", link["form"])
     if isinstance(result, tuple):
         name, data, ctype = result
-        return _saved(_save(name, data, ctype, DOWNLOAD_DIR), ctype)
+        return _file_result(name, data, ctype, DOWNLOAD_DIR)
     return f'Clicado: "{link["texto"]}"\nURL: {result.url}\n\n' + parsers.page_text(result, MAX_CHARS)
 
 
