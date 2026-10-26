@@ -71,14 +71,19 @@ def parse_profile(page: Page) -> dict:
         "nome": clean(soup.select_one("p.usuario > span")),
         "periodo_atual": clean(soup.select_one("#info-usuario > p.periodo-atual > strong")),
     }
-    table = soup.select_one("#perfil-docente table")
-    if table:
-        for tr in table.find_all("tr"):
-            cells = tr.find_all("td")
-            if len(cells) == 2:
-                key = clean(cells[0]).rstrip(":")
-                if key:
-                    data[key] = clean(cells[1])
+    # Barra lateral: matrícula, curso, status, e-mail, entrada, índices
+    # acadêmicos (MC, IRA...) e integralização, em pares rótulo/valor.
+    for tr in soup.select("#perfil-docente tr"):
+        if tr.find("table"):
+            continue
+        cells = [clean(td) for td in tr.find_all("td", recursive=False)]
+        for key, value in zip(cells[0::2], cells[1::2]):
+            key = key.rstrip(":").strip()
+            if key and value and key not in data:
+                data[key] = value
+    integ = re.search(r"(\d+(?:[.,]\d+)?)\s*%\s*Integralizado", clean(soup.select_one("#perfil-docente")))
+    if integ:
+        data["integralizado_percentual"] = integ.group(1)
     switch = soup.select_one("#info-usuario p i small a")
     data["multiplos_vinculos"] = clean(switch) == "Alterar vínculo"
     return data
@@ -87,7 +92,7 @@ def parse_profile(page: Page) -> dict:
 def parse_activities(page: Page) -> list[dict]:
     """Tabela 'Atividades' do portal (#avaliacao-portal)."""
     out = []
-    for tr in page.soup.select("#avaliacao-portal > table tbody > tr"):
+    for tr in page.soup.select("#avaliacao-portal table tr"):
         cells = tr.find_all("td", recursive=False)
         if len(cells) < 3:
             continue
@@ -95,7 +100,8 @@ def parse_activities(page: Page) -> list[dict]:
         info = lines(cells[2].find("small") or cells[2])
         if not info:
             continue
-        kind, _, title = (info[1] if len(info) > 1 else info[0]).partition(": ")
+        # "TURMA<br><strong>Avaliação:</strong> título" vira várias linhas de texto.
+        kind, _, title = (" ".join(info[1:]) if len(info) > 1 else info[0]).partition(": ")
         out.append(
             {
                 "data": clean(cells[1]),
@@ -103,6 +109,8 @@ def parse_activities(page: Page) -> list[dict]:
                 "tipo": kind if title else "",
                 "titulo": title or kind,
                 "concluida": bool(img and img.get("src", "").endswith("/check.png")),
+                # Atividades com prazo vencido aparecem em cinza.
+                "passada": tr.find("font", attrs={"color": "gray"}) is not None,
             }
         )
     return out
