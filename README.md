@@ -145,6 +145,28 @@ Fora do Windows, sem Chrome/Chromium no sistema, rode `sigaa-mcp install-browser
 
 `turma` aceita o código ou um trecho do nome da disciplina, sem acentos.
 
+### Moodle
+
+O servidor também acessa o [Moodle do IFSC](https://moodle.ifsc.edu.br) pela
+API oficial do app Moodle Mobile. O instalador pergunta usuário e senha do
+Moodle no terminal e troca por um token de API; **a senha não é salva**, só o
+token (em `~/.sigaa-mcp/moodle.json`). Para refazer o login:
+
+```bash
+sigaa-mcp moodle-login
+```
+
+| Ferramenta | O que faz |
+|---|---|
+| `moodle_status()` | Verifica o token |
+| `moodle_cursos()` | Cursos inscritos, com progresso |
+| `moodle_conteudo(curso)` | Seções, atividades, recursos e arquivos do curso |
+| `moodle_prazos(dias)` | Próximos prazos em todos os cursos |
+| `moodle_tarefas(curso)` | Tarefas com prazo e enunciado; com `curso`, status da entrega e nota |
+| `moodle_notas(curso)` | Itens de nota com nota, porcentagem e feedback |
+| `moodle_baixar_arquivo(curso, arquivo, pasta)` | Baixa um arquivo do curso (PDFs voltam com o texto) |
+| `moodle_api(funcao, parametros)` | Chama uma função de leitura da API do Moodle |
+
 ### Envios
 
 `enviar_tarefa` e `enviar_formulario` mudam dados no SIGAA em seu nome. Por
@@ -160,6 +182,9 @@ navegação genérica (`formularios_pagina` + `enviar_formulario`) cobre o caso.
 
 | Variável | Padrão | |
 |---|---|---|
+| `MOODLE_URL` | `https://moodle.ifsc.edu.br` | Endereço do Moodle |
+| `MOODLE_TOKEN` | | Token da API do Moodle (tem prioridade sobre o arquivo salvo) |
+| `SIGAA_SKIP_MOODLE` | | No instalador, não pergunta o login do Moodle |
 | `SIGAA_AUTO_LOGIN` | `1` | Abre a janela de login quando a sessão expira; `0` desativa |
 | `SIGAA_JSESSIONID` | | Cookie de sessão (tem prioridade sobre o arquivo salvo) |
 | `SIGAA_KEEPALIVE_MIN` | `10` | Intervalo do keepalive; `0` desativa |
