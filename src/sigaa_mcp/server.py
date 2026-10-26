@@ -280,6 +280,7 @@ USAGE = """uso: sigaa-mcp [comando]
   cookie <valor>    salva o JSESSIONID de um login feito no navegador
   login             abre o navegador para logar e captura o cookie
   keepalive         mantém a sessão salva ativa enquanto estiver rodando
+  install-browser   baixa o Chromium usado pelo login por janela (fora do Windows)
 """
 
 
@@ -294,6 +295,10 @@ def main() -> None:
             asyncio.run(_cli_login())
         elif args[0] == "keepalive":
             asyncio.run(_cli_keepalive())
+        elif args[0] == "install-browser":
+            import subprocess
+
+            sys.exit(subprocess.call([sys.executable, "-m", "playwright", "install", "chromium"]))
         else:
             print(USAGE)
             sys.exit(2)
