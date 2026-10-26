@@ -201,7 +201,7 @@ def build_form(
 def messages(page: Page) -> dict:
     """Mensagens de sucesso/erro que o SIGAA mostra depois de um envio."""
     soup = page.soup
-    errors = [clean(li) for li in soup.select("ul.erros li, .erros li")]
+    errors = list(dict.fromkeys(clean(li) for li in soup.select("#painel-erros ul.erros li, ul.erros li")))
     infos = [clean(li) for li in soup.select("ul.info li, .info li, ul.warning li")]
     ok = "Operação realizada com sucesso" in page.html or any("sucesso" in norm(i) for i in infos)
     return {"sucesso": ok and not errors, "erros": errors, "avisos": infos}

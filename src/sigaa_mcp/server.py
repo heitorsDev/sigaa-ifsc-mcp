@@ -476,6 +476,10 @@ async def enviar_tarefa(
     if task["form"] is None:
         raise SigaaError(f'A tarefa "{task["titulo"]}" não está aberta para envio.')
     send_page = await client.post(task["form"])
+    errors = pages.messages(send_page)["erros"]
+    if errors:
+        # Ex.: "Esta tarefa só estará disponível no período de ..."
+        raise SigaaError("SIGAA: " + " ".join(errors))
 
     candidates = [
         f for f in pages.forms(send_page) if f["arquivos"] or any(c["tipo"] == "textarea" for c in f["campos"])
