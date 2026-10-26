@@ -162,6 +162,64 @@ async def turmas(todos_periodos: bool = False) -> str:
     return _json(parsers.strip_forms(await courses.list_courses(client, todos_periodos)))
 
 
+async def _open_menu(item: str):
+    """Clica num item do menu do portal. Devolve a página ou o arquivo."""
+    portal = await client.get(PORTAL_PATH)
+    entry = pages.find_menu_item(portal, item)
+    return entry, await client.fetch(form=pages.menu_form(portal, entry["acao"]))
+
+
+async def _menu_result(item: str) -> str:
+    entry, result = await _open_menu(item)
+    if isinstance(result, tuple):
+        name, data, ctype = result
+        return f'Item: {entry["texto"]}\n' + _file_result(name, data, ctype, DOWNLOAD_DIR)
+    errors = pages.messages(result)["erros"]
+    if errors:
+        raise SigaaError("SIGAA: " + " ".join(errors))
+    return f'Item: {entry["texto"]}\nURL: {result.url}\n\n' + parsers.page_text(result, MAX_CHARS)
+
+
+@tool
+async def menu_portal(item: str = "", filtro: str = "") -> str:
+    """Menu superior do portal do discente (Ensino, Pesquisa, Extensão...).
+    Sem `item`, lista os itens (opcionalmente filtrados). Com `item` (texto do
+    item ou trecho da ação), abre o item e devolve a página; se for um
+    documento (PDF), salva em ~/Downloads/SIGAA e devolve o texto.
+    Itens de cadastro/matrícula só abrem a tela, nada é enviado."""
+    if not item:
+        portal = await client.get(PORTAL_PATH)
+        q = pages.norm(filtro)
+        items = [i["texto"] for i in pages.portal_menu(portal) if not q or q in pages.norm(i["texto"])]
+        return "\n".join(items) or "Nenhum item encontrado."
+    return await _menu_result(item)
+
+
+@tool
+async def historico(com_aee: bool = False) -> str:
+    """Histórico escolar (PDF): salva em ~/Downloads/SIGAA e devolve o texto."""
+    return await _menu_result("historicoComAee" if com_aee else "historicoSemAee")
+
+
+@tool
+async def boletim() -> str:
+    """Boletim do semestre (Ensino > Boletim)."""
+    return await _menu_result("relatorioNotasAluno.gerarRelatorio")
+
+
+@tool
+async def atestado_matricula() -> str:
+    """Atestado de matrícula: salva o documento e devolve o texto."""
+    return await _menu_result("atestadoMatricula")
+
+
+@tool
+async def declaracao_vinculo() -> str:
+    """Declaração de vínculo: salva o documento e devolve o texto."""
+    return await _menu_result("declaracaoVinculo.emitirDeclaracao")
+
+
+
 # ---- turma virtual --------------------------------------------------------
 
 
