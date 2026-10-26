@@ -14,7 +14,7 @@ import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import httpx
 from bs4 import BeautifulSoup
@@ -86,6 +86,22 @@ def _normalize_cookie(value: str) -> str:
     return m.group(1) if m else value
 
 
+def _filename(resp: httpx.Response) -> str | None:
+    cd = resp.headers.get("content-disposition", "")
+    m = re.search(r"filename\*=(?:UTF-8'')?([^;]+)", cd, re.I) or re.search(
+        r'filename="?([^";]+)', cd, re.I
+    )
+    if not m:
+        return None
+    name = unquote(m.group(1).strip().strip("'\""))
+    # Muitos servidores mandam o nome em ISO-8859-1 dentro do cabeçalho.
+    try:
+        name = name.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        pass
+    return Path(name).name or None
+
+
 def _decode(resp: httpx.Response) -> str:
     charset = resp.charset_encoding
     if not charset:
@@ -100,6 +116,7 @@ class SigaaClient:
         self._http: httpx.AsyncClient | None = None
         self.jsessionid: str | None = None
         self.last_ok: float | None = None
+        self.current: Page | None = None
         self._load()
 
     # ---- sessão ----------------------------------------------------------
@@ -163,28 +180,56 @@ class SigaaClient:
 
     # ---- HTTP ------------------------------------------------------------
 
-    def _check(self, resp: httpx.Response) -> Page:
+    def _check(self, resp: httpx.Response, track: bool = True) -> Page:
         urls = [str(r.headers.get("location", "")) for r in resp.history] + [str(resp.url)]
         html = _decode(resp)
         if any(m in u for u in urls for m in _LOGGED_OUT_MARKERS) or 'name="user.senha"' in html:
             self.last_ok = None
+            self.current = None
             raise SessionExpired("A sessão do SIGAA expirou ou é inválida.")
         if resp.status_code >= 400:
             raise SigaaError(f"SIGAA respondeu {resp.status_code} em {resp.url}.")
         if "Comportamento Inesperado" in html:
             raise SigaaError("SIGAA: 'Comportamento Inesperado!' (estado JSF inválido).")
         self.last_ok = time.time()
-        return Page(str(resp.url), resp.status_code, html)
+        page = Page(str(resp.url), resp.status_code, html)
+        if track:
+            self.current = page
+        return page
 
-    async def get(self, path: str) -> Page:
+    def _require_session(self) -> httpx.AsyncClient:
         if not self.jsessionid:
             raise SessionExpired("Nenhum cookie de sessão configurado.")
-        return self._check(await self._client().get(path))
+        return self._client()
+
+    async def get(self, path: str, track: bool = True) -> Page:
+        return self._check(await self._require_session().get(path), track)
 
     async def post(self, form: Form) -> Page:
-        if not self.jsessionid:
-            raise SessionExpired("Nenhum cookie de sessão configurado.")
-        return self._check(await self._client().post(form.action, data=form.values))
+        return self._check(await self._require_session().post(form.action, data=form.values))
+
+    async def post_multipart(
+        self, form: Form, files: dict[str, tuple[str, bytes, str]]
+    ) -> Page:
+        """POST multipart/form-data: `files` mapeia o nome do campo para
+        (nome do arquivo, conteúdo, content-type)."""
+        http = self._require_session()
+        return self._check(await http.post(form.action, data=form.values, files=files))
+
+    async def download(self, url: str, form: Form | None = None) -> tuple[str, bytes, str]:
+        """Baixa um arquivo por GET (ou POST com `form`).
+        Retorna (nome do arquivo, conteúdo, content-type)."""
+        http = self._require_session()
+        resp = await (http.post(form.action, data=form.values) if form else http.get(url))
+        ctype = resp.headers.get("content-type", "")
+        if "text/html" in ctype:
+            # Arquivos vêm como binário; HTML aqui é página de erro ou de login.
+            self._check(resp, track=False)
+            raise SigaaError("O SIGAA devolveu uma página em vez do arquivo.")
+        if resp.status_code >= 400:
+            raise SigaaError(f"SIGAA respondeu {resp.status_code} ao baixar o arquivo.")
+        self.last_ok = time.time()
+        return _filename(resp) or "arquivo", resp.content, ctype
 
     async def keepalive(self) -> bool:
         """Acessa o portal para a sessão não expirar por inatividade."""
@@ -192,7 +237,7 @@ class SigaaClient:
             return False
         async with self.lock:
             try:
-                await self.get(PORTAL_PATH)
+                await self.get(PORTAL_PATH, track=False)
                 return True
             except (SessionExpired, SigaaError, httpx.HTTPError):
                 return False
