@@ -34,7 +34,7 @@ navegador, abra as ferramentas de desenvolvedor (F12) > **Application** >
 `definir_cookie`, ou rode:
 
 ```bash
-uvx --from git+https://github.com/heitorsDev/sigaa-ifsc-mcp sigaa-mcp cookie SEU_JSESSIONID
+sigaa-mcp cookie SEU_JSESSIONID
 ```
 
 > O cliente MCP precisa esperar enquanto você loga. No Claude Code, se a
@@ -49,7 +49,7 @@ cair. Para manter a sessão ativa também com o cliente MCP fechado, deixe isto
 rodando num terminal:
 
 ```bash
-uvx --from git+https://github.com/heitorsDev/sigaa-ifsc-mcp sigaa-mcp keepalive
+sigaa-mcp keepalive
 ```
 
 O keepalive não evita que a sessão termine se o SIGAA reiniciar ou impuser um
@@ -61,33 +61,50 @@ enquanto a sessão estiver ativa: não compartilhe esse arquivo.**
 
 ## Instalação
 
-Requer o [uv](https://docs.astral.sh/uv/):
+Cole no terminal o comando do seu sistema. O instalador coloca o `uv` (se
+faltar), instala o servidor, prepara o navegador do login por janela e registra
+o servidor no Claude Code e no Claude Desktop, se estiverem instalados.
+
+**Linux (inclusive Arch) e macOS**
 
 ```bash
-winget install --id=astral-sh.uv -e
+curl -fsSL https://raw.githubusercontent.com/heitorsDev/sigaa-ifsc-mcp/main/install.sh | bash
 ```
 
-### Claude Code
+**Windows (PowerShell)**
+
+```powershell
+irm https://raw.githubusercontent.com/heitorsDev/sigaa-ifsc-mcp/main/install.ps1 | iex
+```
+
+Rodar o mesmo comando de novo atualiza para a versão mais recente.
+
+No Arch, o instalador usa o `pacman` (pede `sudo`) para instalar o `uv` e, se não
+houver Chromium/Chrome, o `chromium`. No Windows, o login usa o Edge. Nos outros
+casos, ele usa o Chrome/Chromium do sistema ou baixa o do Playwright.
+
+Variáveis opcionais do instalador: `SIGAA_MCP_REF` (branch ou tag),
+`SIGAA_MCP_NAME` (nome do servidor, padrão `sigaa`) e `SIGAA_BROWSER_PATH`.
+
+### Instalação manual
 
 ```bash
-claude mcp add sigaa -- uvx --from git+https://github.com/heitorsDev/sigaa-ifsc-mcp sigaa-mcp
+uv tool install "sigaa-ifsc-mcp @ https://github.com/heitorsDev/sigaa-ifsc-mcp/archive/main.zip"
+claude mcp add --scope user sigaa -- sigaa-mcp
 ```
 
-### Claude Desktop (`claude_desktop_config.json`)
+Para o Claude Desktop (`claude_desktop_config.json`), use o caminho completo
+mostrado por `uv tool dir --bin`:
 
 ```json
 {
   "mcpServers": {
-    "sigaa": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/heitorsDev/sigaa-ifsc-mcp", "sigaa-mcp"]
-    }
+    "sigaa": { "command": "/caminho/para/sigaa-mcp", "args": [] }
   }
 }
 ```
 
-Fora do Windows, o login por janela usa o Chromium do Playwright:
-`uvx --from playwright playwright install chromium`.
+Fora do Windows, sem Chrome/Chromium no sistema, rode `sigaa-mcp install-browser`.
 
 ## Ferramentas
 
@@ -121,6 +138,7 @@ Fora do Windows, o login por janela usa o Chromium do Playwright:
 | `SIGAA_MAX_CHARS` | `20000` | Limite de texto por página devolvida |
 | `SIGAA_LOGIN_TIMEOUT` | `300` | Segundos esperando o login por janela |
 | `SIGAA_BROWSER_CHANNEL` | `msedge` no Windows | Navegador do login por janela; vazio usa o Chromium do Playwright |
+| `SIGAA_BROWSER_PATH` | | Executável de um Chrome/Chromium do sistema para o login por janela |
 
 ## Limitações
 
