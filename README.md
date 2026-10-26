@@ -122,10 +122,30 @@ Fora do Windows, sem Chrome/Chromium no sistema, rode `sigaa-mcp install-browser
 | `tarefas(turma)` | Tarefas, prazos e se já foram enviadas |
 | `avaliacoes(turma)` | Calendário de provas da turma |
 | `noticias(turma, com_conteudo, limite)` | Notícias da turma, com o texto |
-| `secao_turma(turma, secao)` | Texto de qualquer seção da turma (Arquivos, Plano de Ensino, Participantes...) |
+| `topicos(turma)` | Tópicos de aula com conteúdo e materiais (arquivos, tarefas, links) |
+| `arquivos(turma)` | Arquivos da seção Arquivos da turma |
+| `baixar_arquivo(turma, arquivo, pasta)` | Baixa um arquivo da turma ou de um tópico para `~/Downloads/SIGAA` |
+| `enviar_tarefa(turma, tarefa, arquivo, comentario, confirmar)` | Entrega uma tarefa com arquivo e/ou comentário |
+| `secao_turma(turma, secao)` | Texto de qualquer seção da turma (Plano de Ensino, Participantes, Referências...) |
 | `abrir_pagina(caminho)` | Texto de uma página do SIGAA com URL fixa |
+| `pagina_atual()` | Texto da última página aberta |
+| `links_pagina(filtro)` | Links da página atual, com índice |
+| `clicar(texto \| indice)` | Segue um link; se for arquivo, salva em `~/Downloads/SIGAA` |
+| `formularios_pagina()` | Formulários da página atual: campos, arquivos e botões |
+| `enviar_formulario(formulario, campos, arquivos, botao, confirmar)` | Preenche e envia um formulário, inclusive com arquivos |
 
 `turma` aceita o código ou um trecho do nome da disciplina, sem acentos.
+
+### Envios
+
+`enviar_tarefa` e `enviar_formulario` mudam dados no SIGAA em seu nome. Por
+isso, sem `confirmar=true` elas **só mostram uma prévia** do que seria enviado.
+O Claude deve mostrar essa prévia e pedir a sua aprovação antes de confirmar.
+
+O formulário de entrega de tarefa ainda não foi visto aberto: quando o
+explorei, nenhuma tarefa estava no prazo. `enviar_tarefa` procura o campo de
+arquivo, o de comentário e o botão "Enviar" por heurística. Se falhar, a
+navegação genérica (`formularios_pagina` + `enviar_formulario`) cobre o caso.
 
 ## Variáveis de ambiente
 
@@ -136,6 +156,8 @@ Fora do Windows, sem Chrome/Chromium no sistema, rode `sigaa-mcp install-browser
 | `SIGAA_KEEPALIVE_MIN` | `10` | Intervalo do keepalive; `0` desativa |
 | `SIGAA_STATE_DIR` | `~/.sigaa-mcp` | Onde ficam o cookie e o perfil do navegador |
 | `SIGAA_MAX_CHARS` | `20000` | Limite de texto por página devolvida |
+| `SIGAA_DOWNLOAD_DIR` | `~/Downloads/SIGAA` | Onde os arquivos baixados são salvos |
+| `SIGAA_MAX_UPLOAD_MB` | `50` | Tamanho máximo de arquivo enviado |
 | `SIGAA_LOGIN_TIMEOUT` | `300` | Segundos esperando o login por janela |
 | `SIGAA_BROWSER_CHANNEL` | `msedge` no Windows | Navegador do login por janela; vazio usa o Chromium do Playwright |
 | `SIGAA_BROWSER_PATH` | | Executável de um Chrome/Chromium do sistema para o login por janela |
