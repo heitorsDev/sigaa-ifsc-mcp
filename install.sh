@@ -59,7 +59,19 @@ main() {
     "$bin" install-browser </dev/null || warn "Falha ao baixar o Chromium; defina SIGAA_BROWSER_PATH e rode de novo."
   fi
 
-  # 4. clientes MCP -------------------------------------------------------
+  # 4. Moodle ---------------------------------------------------------------
+  # Com `curl | bash` a entrada padrão é o script, então lê do terminal.
+  if [ -z "${SIGAA_SKIP_MOODLE:-}" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+    local answer=""
+    printf 'Configurar o login do Moodle agora? [S/n] ' >/dev/tty
+    read -r answer </dev/tty || answer="n"
+    case "$answer" in
+      [nN]*) info "Moodle pulado; depois rode: $bin moodle-login" ;;
+      *) "$bin" moodle-login </dev/tty >/dev/tty 2>&1 || warn "Login do Moodle falhou; rode depois: $bin moodle-login" ;;
+    esac
+  fi
+
+  # 5. clientes MCP -------------------------------------------------------
   local registered=0 entry
   entry="$(entry_json "$bin" "$browser")"
 
@@ -85,7 +97,7 @@ main() {
     warn "Reinicie o Claude Desktop para carregar o servidor."
   fi
 
-  # 5. fim ------------------------------------------------------------------
+  # 6. fim ------------------------------------------------------------------
   echo
   info "Pronto! Executável: $bin"
   if [ "$registered" = 0 ]; then
