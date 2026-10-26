@@ -7,23 +7,20 @@ import functools
 import json
 import mimetypes
 import os
-import re
 import sys
-import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from bs4 import BeautifulSoup
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import Error as PlaywrightError
 
 from . import courses, documents, pages, parsers, schedule, search
 from .browser_login import capture_jsessionid
 from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, SigaaError
-from .moodle import MoodleAuthError, MoodleClient, MoodleError
+from .moodle import MoodleAuthError, MoodleError
 
 KEEPALIVE_MIN = float(os.environ.get("SIGAA_KEEPALIVE_MIN", "10"))
 MAX_CHARS = int(os.environ.get("SIGAA_MAX_CHARS", "20000"))
@@ -36,6 +33,11 @@ client = SigaaClient()
 HOW_TO_LOGIN = (
     "Para reconectar, chame `login_navegador` (abre uma janela para o usuário entrar "
     "no SIGAA) ou `definir_cookie` com o JSESSIONID de um login feito no navegador."
+)
+
+MOODLE_LOGIN_HINT = (
+    "Para configurar o Moodle, o usuário deve rodar `sigaa-mcp moodle-login` num terminal "
+    "(pede usuário e senha e salva só o token)."
 )
 
 
@@ -54,7 +56,9 @@ async def lifespan(_server):
         if task:
             task.cancel()
         await client.aclose()
-        await moodle_client.aclose()
+        from .moodle_tools import close_all
+
+        await close_all()
 
 
 mcp = FastMCP("sigaa-ifsc", lifespan=lifespan)
@@ -677,218 +681,6 @@ async def enviar_tarefa(
     return header + await _submit(send_page, target["id"], campos, uploads, botao, confirmar)
 
 
-# ---- Moodle -----------------------------------------------------------------
-
-moodle_client = MoodleClient()
-
-MOODLE_LOGIN_HINT = (
-    "Para configurar o Moodle, o usuário deve rodar `sigaa-mcp moodle-login` num terminal "
-    "(pede usuário e senha e salva só o token)."
-)
-
-
-def _html_text(html_str: str | None) -> str:
-    if not html_str:
-        return ""
-    return "\n".join(parsers.lines(BeautifulSoup(html_str, "html.parser")))
-
-
-def _ts(value: int | None) -> str:
-    return datetime.fromtimestamp(value).strftime("%d/%m/%Y %H:%M") if value else ""
-
-
-async def _moodle_courses() -> list[dict]:
-    site = await moodle_client.site_info()
-    return await moodle_client.call("core_enrol_get_users_courses", userid=site["userid"])
-
-
-async def _moodle_course(query: str) -> dict:
-    courses = await _moodle_courses()
-    q = pages.norm(query)
-    for match in (
-        lambda c: str(c["id"]) == query or pages.norm(c.get("shortname", "")) == q,
-        lambda c: pages.norm(c.get("fullname", "")) == q,
-        lambda c: q in pages.norm(f'{c.get("shortname", "")} {c.get("fullname", "")}'),
-    ):
-        found = [c for c in courses if match(c)]
-        if len(found) == 1:
-            return found[0]
-        if len(found) > 1:
-            raise MoodleError(f'"{query}" corresponde a vários cursos: ' + "; ".join(c["fullname"] for c in found))
-    raise MoodleError(f'Curso "{query}" não encontrado no Moodle. Use moodle_cursos para listar.')
-
-
-@tool(auto_login=False)
-async def moodle_status() -> str:
-    """Verifica o token do Moodle e mostra o usuário e o site."""
-    site = await moodle_client.site_info()
-    return f"Moodle OK: {site.get('fullname')} em {site.get('siteurl')} (Moodle {site.get('release', '?')})."
-
-
-@tool(auto_login=False)
-async def moodle_cursos() -> str:
-    """Cursos (disciplinas) em que o aluno está inscrito no Moodle, com progresso."""
-    courses = await _moodle_courses()
-    return _json(
-        [
-            {
-                "id": c["id"],
-                "nome_curto": c.get("shortname"),
-                "nome": c.get("fullname"),
-                "progresso": c.get("progress"),
-                "inicio": _ts(c.get("startdate")),
-                "fim": _ts(c.get("enddate")),
-                "ultimo_acesso": _ts(c.get("lastaccess")),
-            }
-            for c in courses
-        ]
-    )
-
-
-@tool(auto_login=False)
-async def moodle_conteudo(curso: str) -> str:
-    """Conteúdo de um curso do Moodle (pelo id, nome curto ou trecho do nome):
-    seções, atividades, recursos e arquivos de cada um."""
-    course = await _moodle_course(curso)
-    sections = await moodle_client.call("core_course_get_contents", courseid=course["id"])
-    out = []
-    for s in sections:
-        modules = []
-        for m in s.get("modules", []):
-            modules.append(
-                {
-                    "id": m.get("id"),
-                    "tipo": m.get("modname"),
-                    "nome": m.get("name"),
-                    "descricao": _html_text(m.get("description")),
-                    "url": m.get("url"),
-                    "arquivos": [
-                        {"nome": f.get("filename"), "tamanho": f.get("filesize"), "modificado": _ts(f.get("timemodified"))}
-                        for f in m.get("contents", [])
-                        if f.get("type") == "file"
-                    ],
-                }
-            )
-        out.append({"secao": s.get("name"), "resumo": _html_text(s.get("summary")), "itens": modules})
-    return _json({"curso": course["fullname"], "secoes": out})
-
-
-@tool(auto_login=False)
-async def moodle_prazos(dias: int = 14) -> str:
-    """Próximos prazos do Moodle (tarefas, questionários, fóruns...) nos
-    próximos `dias`, em todos os cursos."""
-    now = int(time.time())
-    data = await moodle_client.call(
-        "core_calendar_get_action_events_by_timesort",
-        timesortfrom=now,
-        timesortto=now + max(dias, 1) * 86400,
-        limitnum=50,
-    )
-    return _json(
-        [
-            {
-                "quando": _ts(e.get("timesort")),
-                "curso": (e.get("course") or {}).get("fullname"),
-                "atividade": e.get("name"),
-                "tipo": e.get("modulename"),
-                "acao": (e.get("action") or {}).get("name"),
-                "url": e.get("url"),
-            }
-            for e in data.get("events", [])
-        ]
-    )
-
-
-@tool(auto_login=False)
-async def moodle_tarefas(curso: str = "") -> str:
-    """Tarefas (assign) do Moodle: prazo, data de corte e enunciado. Com `curso`,
-    também traz o status da entrega e a nota de cada tarefa."""
-    course = await _moodle_course(curso) if curso else None
-    ids = [course["id"]] if course else [c["id"] for c in await _moodle_courses()]
-    data = await moodle_client.call("mod_assign_get_assignments", courseids=ids)
-    out = []
-    for c in data.get("courses", []):
-        for a in c.get("assignments", []):
-            item = {
-                "curso": c.get("fullname"),
-                "id": a.get("id"),
-                "nome": a.get("name"),
-                "prazo": _ts(a.get("duedate")),
-                "corte": _ts(a.get("cutoffdate")),
-                "enunciado": _html_text(a.get("intro")),
-            }
-            if course:
-                status = await moodle_client.call("mod_assign_get_submission_status", assignid=a["id"])
-                attempt = (status.get("lastattempt") or {}).get("submission") or {}
-                feedback = status.get("feedback") or {}
-                item["entrega"] = attempt.get("status")
-                item["nota"] = (feedback.get("gradefordisplay") or "").strip() or None
-            out.append(item)
-    return _json(out)
-
-
-@tool(auto_login=False)
-async def moodle_notas(curso: str) -> str:
-    """Notas de um curso do Moodle: cada item de nota com nota, porcentagem e
-    feedback."""
-    course = await _moodle_course(curso)
-    site = await moodle_client.site_info()
-    data = await moodle_client.call("gradereport_user_get_grade_items", courseid=course["id"], userid=site["userid"])
-    items = []
-    for report in data.get("usergrades", []):
-        for g in report.get("gradeitems", []):
-            items.append(
-                {
-                    "item": g.get("itemname") or ("Total do curso" if g.get("itemtype") == "course" else g.get("itemtype")),
-                    "nota": g.get("gradeformatted"),
-                    "faixa": g.get("rangeformatted"),
-                    "porcentagem": g.get("percentageformatted"),
-                    "feedback": _html_text(g.get("feedback")),
-                }
-            )
-    return _json({"curso": course["fullname"], "notas": items})
-
-
-@tool(auto_login=False)
-async def moodle_baixar_arquivo(curso: str, arquivo: str, pasta: str = "") -> str:
-    """Baixa um arquivo de um curso do Moodle (pelo nome do arquivo ou do
-    recurso, ou trecho) para ~/Downloads/SIGAA/moodle/<curso>. PDFs voltam
-    também com o texto."""
-    course = await _moodle_course(curso)
-    sections = await moodle_client.call("core_course_get_contents", courseid=course["id"])
-    files = [
-        {**f, "modulo": m.get("name", "")}
-        for s in sections
-        for m in s.get("modules", [])
-        for f in m.get("contents", [])
-        if f.get("type") == "file"
-    ]
-    q = pages.norm(arquivo)
-    found = [f for f in files if pages.norm(f["filename"]) == q] or [
-        f for f in files if q in pages.norm(f["filename"]) or q in pages.norm(f["modulo"])
-    ]
-    if not found:
-        names = "; ".join(f["filename"] for f in files[:40]) or "nenhum"
-        raise MoodleError(f'Arquivo "{arquivo}" não encontrado. Arquivos: {names}.')
-    f = found[0]
-    data, ctype = await moodle_client.download(f["fileurl"])
-    folder = Path(pasta).expanduser() if pasta else DOWNLOAD_DIR / "moodle" / (course.get("shortname") or str(course["id"]))
-    return _file_result(f["filename"], data, ctype or f.get("mimetype", ""), folder)
-
-
-@tool(auto_login=False)
-async def moodle_api(funcao: str, parametros: dict | None = None) -> str:
-    """Chama diretamente uma função de consulta da API do Moodle (só funções
-    de leitura, com 'get' ou 'search' no nome), para buscas que as outras
-    ferramentas não cobrem. Ex.: funcao='mod_forum_get_forums_by_courses',
-    parametros={'courseids': [123]}."""
-    if not re.search(r"_(get|search)_|_get$", funcao):
-        return "Por segurança, só funções de leitura (com 'get' ou 'search' no nome) são permitidas."
-    result = await moodle_client.call(funcao, **(parametros or {}))
-    text = _json(result)
-    return text if len(text) <= MAX_CHARS else text[:MAX_CHARS] + f"\n[... truncado em {MAX_CHARS} caracteres]"
-
-
 # ---- CLI ------------------------------------------------------------------
 
 
@@ -986,6 +778,9 @@ def main() -> None:
     except KeyboardInterrupt:
         pass
 
+
+# Ferramentas do Moodle: registradas depois que `tool`, `_json` e `_file_result` existem.
+from . import moodle_tools  # noqa: E402,F401
 
 if __name__ == "__main__":
     main()
