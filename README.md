@@ -117,6 +117,15 @@ Fora do Windows, sem Chrome/Chromium no sistema, rode `sigaa-mcp install-browser
 | `perfil()` | Nome, matrícula, curso, status, período atual |
 | `atividades()` | Tarefas, questionários e avaliações próximas do portal |
 | `turmas(todos_periodos)` | Turmas do semestre (ou de todos os períodos) |
+| `grade_horarios(data)` | Grade da semana (aulas por dia, horário, sala), montada a partir do comprovante de matrícula |
+| `historico(com_aee)` | Histórico escolar: salva o PDF e devolve o texto |
+| `boletim()` | Boletim do semestre |
+| `atestado_matricula()` / `declaracao_vinculo()` | Documentos: salva e devolve o texto |
+| `menu_portal(item, filtro)` | Lista ou abre qualquer item do menu do portal (Ensino, Pesquisa, Extensão...) |
+| `buscar_turmas(disciplina, codigo, docente, horario, local, ano_periodo)` | Consulta turmas de todo o IFSC |
+| `detalhes_turma(id)` | Capacidade, matriculados, professores e vagas de uma turma |
+| `buscar_componentes(nome, codigo)` | Consulta disciplinas (componentes curriculares) |
+| `calendario_academico()` | Prazos do calendário acadêmico mais recente |
 | `notas(turma)` | Notas por unidade e avaliação |
 | `frequencia(turma)` | Faltas por aula, total e máximo permitido |
 | `tarefas(turma)` | Tarefas, prazos e se já foram enviadas |
@@ -163,6 +172,14 @@ navegação genérica (`formularios_pagina` + `enviar_formulario`) cobre o caso.
 | `SIGAA_BROWSER_PATH` | | Executável de um Chrome/Chromium do sistema para o login por janela |
 
 ## Limitações
+
+- A grade de horários do SIGAA do IFSC só existe no comprovante de matrícula,
+  e turmas de horário flexível não aparecem desenhadas nela. `grade_horarios`
+  monta a grade decodificando os códigos de horário (`24M34` = seg e qua, manhã,
+  3ª e 4ª aulas), respeitando o período de validade de cada padrão.
+- A área pública do SIGAA (`/sigaa/public`) exige CAPTCHA mesmo para quem está
+  logado, então o servidor não a usa. As buscas partem do portal do discente.
+- A biblioteca (SophiA) é um sistema separado, fora do SIGAA, e não está coberta.
 
 - Se você tiver mais de um vínculo (por exemplo, dois cursos), o servidor usa o
   vínculo escolhido na sessão do navegador.
