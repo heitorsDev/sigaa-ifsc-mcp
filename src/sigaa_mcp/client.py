@@ -144,8 +144,12 @@ class SigaaClient:
 
     async def set_cookie(self, value: str) -> Page:
         """Troca o cookie da sessão, valida no portal e salva em disco."""
-        self.jsessionid = _normalize_cookie(value)
-        page = await self.get(PORTAL_PATH)
+        previous, self.jsessionid = self.jsessionid, _normalize_cookie(value)
+        try:
+            page = await self.get(PORTAL_PATH)
+        except Exception:
+            self.jsessionid = previous
+            raise
         self._save()
         return page
 
