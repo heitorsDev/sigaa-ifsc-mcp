@@ -289,12 +289,22 @@ async def baixar_arquivo(turma: str, arquivo: str, pasta: str = "") -> str:
         names = "; ".join(f["titulo"] for f in files) or "nenhum"
         raise SigaaError(f'Arquivo "{arquivo}" não encontrado. Arquivos: {names}.')
     f = found[0]
+    # O POST JSF é o que o navegador faz; o GET em /sigaa/verFoto (usado pelo
+    # sigaa-api) fica como alternativa caso o estado JSF esteja velho.
+    attempts = []
+    if f["form"]:
+        attempts.append(lambda: client.download(form=f["form"]))
     if f["id"] and f["key"]:
-        name, data, ctype = await client.download(f"/sigaa/verFoto?idArquivo={f['id']}&key={f['key']}")
-    elif f["form"]:
-        name, data, ctype = await client.download(form=f["form"])
-    else:
+        attempts.append(lambda: client.download(f"/sigaa/verFoto?idArquivo={f['id']}&key={f['key']}"))
+    if not attempts:
         raise SigaaError("Este arquivo não tem link de download.")
+    for i, attempt in enumerate(attempts):
+        try:
+            name, data, ctype = await attempt()
+            break
+        except SigaaError:
+            if i == len(attempts) - 1:
+                raise
     if name == "arquivo":
         name = f["titulo"]
     folder = Path(pasta).expanduser() if pasta else DOWNLOAD_DIR / course["codigo"]
