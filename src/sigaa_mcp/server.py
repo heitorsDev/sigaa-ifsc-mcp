@@ -17,7 +17,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from playwright.async_api import Error as PlaywrightError
 
-from . import courses, documents, pages, parsers, schedule
+from . import courses, documents, pages, parsers, schedule, search
 from .browser_login import capture_jsessionid
 from .client import BASE_URL, HOST, PORTAL_PATH, SessionExpired, SigaaClient, SigaaError
 
@@ -271,6 +271,68 @@ async def grade_horarios(data: str = "") -> str:
             "turmas": info["turmas"],
         }
     )
+
+
+# ---- buscas ---------------------------------------------------------------
+
+
+@tool
+async def buscar_turmas(
+    disciplina: str = "",
+    codigo: str = "",
+    docente: str = "",
+    horario: str = "",
+    local: str = "",
+    ano_periodo: str = "",
+    limite: int = 50,
+) -> str:
+    """Consulta turmas de todo o IFSC (Ensino > Consultar Turma): por nome ou
+    código da disciplina, docente, horário (ex.: '24M34'), local e período
+    ('2026.2'; padrão: período atual). Devolve docentes, horário, local,
+    vagas e o `id` para usar em `detalhes_turma`."""
+    filters = {
+        "Disciplina": disciplina,
+        "Codigo": codigo,
+        "Docente": docente,
+        "Horario": horario,
+        "Local": local,
+    }
+    if ano_periodo:
+        filters["AnoPeriodo"] = ano_periodo
+    if not any(filters.values()):
+        return "Informe pelo menos um filtro (disciplina, código, docente, horário ou local)."
+    return _json(await search.search_classes(client, filters, max(limite, 1)))
+
+
+@tool
+async def detalhes_turma(id: str) -> str:
+    """Detalhes de uma turma achada em `buscar_turmas`: curso, carga horária,
+    horário, local, capacidade, matriculados, professores e vagas reservadas."""
+    if not id.isdigit():
+        return "O id da turma é numérico (veja o campo `id` de buscar_turmas)."
+    page = await client.get(search.CLASS_DETAILS_PATH.format(id=id))
+    return parsers.page_text(page, MAX_CHARS)
+
+
+@tool
+async def buscar_componentes(nome: str = "", codigo: str = "") -> str:
+    """Consulta componentes curriculares (disciplinas) por nome e/ou código:
+    código, nome, créditos, carga horária. Para ver ementa, pré-requisitos e
+    equivalências, use `links_pagina(filtro='Visualizar')` e `clicar` em seguida."""
+    if not (nome or codigo):
+        return "Informe `nome` e/ou `codigo`."
+    page = await search.search_components(client, nome, codigo)
+    return _json(search.parse_table(page))
+
+
+@tool
+async def calendario_academico() -> str:
+    """Calendário acadêmico mais recente: período letivo e prazos (matrícula,
+    trancamento, cancelamento etc.)."""
+    listing, detail = await search.academic_calendar(client)
+    if detail is None:
+        return parsers.page_text(listing, MAX_CHARS)
+    return parsers.page_text(detail, MAX_CHARS)
 
 
 # ---- turma virtual --------------------------------------------------------
