@@ -189,6 +189,12 @@ class SigaaClient:
             raise SessionExpired("A sessão do SIGAA expirou ou é inválida.")
         if resp.status_code >= 400:
             raise SigaaError(f"SIGAA respondeu {resp.status_code} em {resp.url}.")
+        if "cf-turnstile" in html or "challenges.cloudflare.com/turnstile" in html:
+            # A área pública (/sigaa/public) fica atrás do CAPTCHA, mesmo logado.
+            raise SigaaError(
+                "Esta página do SIGAA exige CAPTCHA (Cloudflare Turnstile); o servidor MCP não a acessa. "
+                "Abra-a no navegador."
+            )
         if "Comportamento Inesperado" in html:
             raise SigaaError("SIGAA: 'Comportamento Inesperado!' (estado JSF inválido).")
         self.last_ok = time.time()
