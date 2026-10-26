@@ -216,20 +216,28 @@ class SigaaClient:
         http = self._require_session()
         return self._check(await http.post(form.action, data=form.values, files=files))
 
-    async def download(self, url: str, form: Form | None = None) -> tuple[str, bytes, str]:
-        """Baixa um arquivo por GET (ou POST com `form`).
-        Retorna (nome do arquivo, conteúdo, content-type)."""
+    async def fetch(
+        self, url: str = "", form: Form | None = None
+    ) -> Page | tuple[str, bytes, str]:
+        """GET (ou POST com `form`) que pode resultar numa página ou num arquivo.
+        Páginas viram `Page`; arquivos, (nome, conteúdo, content-type)."""
         http = self._require_session()
         resp = await (http.post(form.action, data=form.values) if form else http.get(url))
         ctype = resp.headers.get("content-type", "")
-        if "text/html" in ctype:
-            # Arquivos vêm como binário; HTML aqui é página de erro ou de login.
-            self._check(resp, track=False)
-            raise SigaaError("O SIGAA devolveu uma página em vez do arquivo.")
+        if "html" in ctype or (not ctype and resp.content.lstrip()[:1] == b"<"):
+            return self._check(resp)
         if resp.status_code >= 400:
             raise SigaaError(f"SIGAA respondeu {resp.status_code} ao baixar o arquivo.")
         self.last_ok = time.time()
         return _filename(resp) or "arquivo", resp.content, ctype
+
+    async def download(self, url: str = "", form: Form | None = None) -> tuple[str, bytes, str]:
+        """Baixa um arquivo por GET (ou POST com `form`).
+        Retorna (nome do arquivo, conteúdo, content-type)."""
+        result = await self.fetch(url, form)
+        if isinstance(result, Page):
+            raise SigaaError("O SIGAA devolveu uma página em vez do arquivo.")
+        return result
 
     async def keepalive(self) -> bool:
         """Acessa o portal para a sessão não expirar por inatividade."""
