@@ -19,13 +19,19 @@ LOGIN_URL = f"{BASE_URL}/sigaa/verTelaLogin.do"
 TIMEOUT_S = int(os.environ.get("SIGAA_LOGIN_TIMEOUT", "300"))
 # Edge já vem no Windows; em outros sistemas usa o Chromium do Playwright.
 CHANNEL = os.environ.get("SIGAA_BROWSER_CHANNEL", "msedge" if os.name == "nt" else "") or None
+# Caminho de um Chromium/Chrome do sistema (ex.: /usr/bin/chromium no Arch).
+BROWSER_PATH = os.environ.get("SIGAA_BROWSER_PATH") or None
 PROFILE_DIR = STATE_DIR / "browser-profile"
 
 
 async def capture_jsessionid() -> str | None:
     async with async_playwright() as pw:
         ctx = await pw.chromium.launch_persistent_context(
-            str(PROFILE_DIR), headless=False, channel=CHANNEL, locale="pt-BR"
+            str(PROFILE_DIR),
+            headless=False,
+            channel=None if BROWSER_PATH else CHANNEL,
+            executable_path=BROWSER_PATH,
+            locale="pt-BR",
         )
         try:
             page = ctx.pages[0] if ctx.pages else await ctx.new_page()
