@@ -1,0 +1,25 @@
+[project]
+name = "sigaa-ifsc-mcp"
+version = "0.1.0"
+description = "Servidor MCP para consultar o portal do discente do SIGAA do IFSC"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.2",
+    "httpx>=0.27",
+    "beautifulsoup4>=4.12",
+]
+
+[project.optional-dependencies]
+browser = ["playwright>=1.45"]
+
+[project.scripts]
+sigaa-mcp = "sigaa_mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sigaa_mcp"]
