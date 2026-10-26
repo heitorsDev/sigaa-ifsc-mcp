@@ -12,26 +12,34 @@ A navegação e a extração de dados foram portadas da biblioteca
 ## Autenticação
 
 O login do SIGAA tem um CAPTCHA (Cloudflare Turnstile), então este servidor
-**não faz login nem recebe a sua senha**. Ele usa o cookie `JSESSIONID` de uma
-sessão que você abriu no navegador. Há duas formas de entregar esse cookie:
+**não digita a sua senha nem resolve o CAPTCHA**. Quem loga é você, numa janela
+do navegador que o próprio servidor abre:
 
-**1. Colar o cookie**
+1. Você pede algo ao Claude (por exemplo, "quais são minhas notas?").
+2. Se não houver sessão válida, o servidor abre uma janela do Edge (no Windows)
+   ou do Chromium na tela de login do SIGAA.
+3. Você entra normalmente. Quando o portal do discente abre, o servidor captura
+   o cookie `JSESSIONID`, fecha a janela e responde ao que você pediu.
 
-1. Entre em <https://sig.ifsc.edu.br/sigaa> no navegador.
-2. Abra as ferramentas de desenvolvedor (F12) e vá em **Application** (Chrome/Edge)
-   ou **Armazenamento** (Firefox), depois em **Cookies**, `https://sig.ifsc.edu.br`.
-3. Copie o valor de `JSESSIONID` e chame a ferramenta `definir_cookie`, ou rode:
+O perfil desse navegador fica salvo em `~/.sigaa-mcp/browser-profile`. Se você
+deixar o navegador lembrar a senha, os próximos logins são só clicar em "Entrar".
 
-   ```bash
-   uvx --from git+https://github.com/heitorsDev/sigaa-ifsc-mcp sigaa-mcp cookie SEU_JSESSIONID
-   ```
+Para logar sem esperar uma consulta, use a ferramenta `login_navegador` ou o
+comando `sigaa-mcp login`. Para desligar a janela automática, use
+`SIGAA_AUTO_LOGIN=0`.
 
-**2. Login por janela** (extra opcional `browser`)
+**Alternativa: colar o cookie.** Entre em <https://sig.ifsc.edu.br/sigaa> no seu
+navegador, abra as ferramentas de desenvolvedor (F12) > **Application** >
+**Cookies** > `https://sig.ifsc.edu.br`, copie o valor de `JSESSIONID` e chame
+`definir_cookie`, ou rode:
 
-A ferramenta `login_navegador`, ou o comando `sigaa-mcp login`, abre uma janela
-do Edge (no Windows) ou do Chromium. Você faz o login normalmente, e o cookie é
-capturado quando o portal abre. O perfil desse navegador fica salvo, então dá
-para deixar o navegador lembrar a senha e os próximos logins levam segundos.
+```bash
+uvx --from git+https://github.com/heitorsDev/sigaa-ifsc-mcp sigaa-mcp cookie SEU_JSESSIONID
+```
+
+> O cliente MCP precisa esperar enquanto você loga. No Claude Code, se a
+> ferramenta der timeout antes de você terminar, aumente `MCP_TOOL_TIMEOUT`
+> (em milissegundos).
 
 ### Manter a sessão viva
 
@@ -65,12 +73,6 @@ winget install --id=astral-sh.uv -e
 claude mcp add sigaa -- uvx --from git+https://github.com/heitorsDev/sigaa-ifsc-mcp sigaa-mcp
 ```
 
-Com o login por janela:
-
-```bash
-claude mcp add sigaa -- uvx --from "sigaa-ifsc-mcp[browser] @ git+https://github.com/heitorsDev/sigaa-ifsc-mcp" sigaa-mcp
-```
-
 ### Claude Desktop (`claude_desktop_config.json`)
 
 ```json
@@ -92,7 +94,7 @@ Fora do Windows, o login por janela usa o Chromium do Playwright:
 | Ferramenta | O que faz |
 |---|---|
 | `definir_cookie(cookie)` | Valida e salva o `JSESSIONID` |
-| `login_navegador()` | Abre o navegador para logar e captura o cookie |
+| `login_navegador()` | Abre o navegador para logar e captura o cookie (acontece sozinho quando a sessão expira) |
 | `status()` | Diz se a sessão é válida |
 | `esquecer_sessao()` | Apaga o cookie salvo |
 | `perfil()` | Nome, matrícula, curso, status, período atual |
@@ -112,6 +114,7 @@ Fora do Windows, o login por janela usa o Chromium do Playwright:
 
 | Variável | Padrão | |
 |---|---|---|
+| `SIGAA_AUTO_LOGIN` | `1` | Abre a janela de login quando a sessão expira; `0` desativa |
 | `SIGAA_JSESSIONID` | | Cookie de sessão (tem prioridade sobre o arquivo salvo) |
 | `SIGAA_KEEPALIVE_MIN` | `10` | Intervalo do keepalive; `0` desativa |
 | `SIGAA_STATE_DIR` | `~/.sigaa-mcp` | Onde ficam o cookie e o perfil do navegador |
