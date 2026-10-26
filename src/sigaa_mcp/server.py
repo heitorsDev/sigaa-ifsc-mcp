@@ -275,16 +275,42 @@ async def arquivos(turma: str) -> str:
 
 
 @tool
+async def topicos(turma: str) -> str:
+    """Tópicos de aula da turma (página principal): título, período, conteúdo e
+    materiais de cada aula (arquivos, tarefas e links)."""
+    course, page = await courses.open_course(client, turma)
+    topics = parsers.parse_topics(page)
+    for t in topics:
+        t["materiais"] = [{k: v for k, v in m.items() if k not in ("form", "key")} for m in t["materiais"]]
+    return _json({"turma": f'{course["codigo"]} - {course["nome"]}', "topicos": topics})
+
+
+@tool
 async def baixar_arquivo(turma: str, arquivo: str, pasta: str = "") -> str:
     """Baixa um arquivo da seção 'Arquivos' de uma turma (pelo título, trecho
     dele ou id) e salva no computador. Padrão: ~/Downloads/SIGAA/<código da turma>.
     Retorna o caminho do arquivo salvo."""
+    q = pages.norm(arquivo)
+
+    def match(files: list[dict]) -> list[dict]:
+        return [f for f in files if f["id"] == arquivo or pages.norm(f["titulo"]) == q] or [
+            f for f in files if q in pages.norm(f["titulo"])
+        ]
+
     course, page = await courses.open_section(client, turma, "Arquivos")
     files = parsers.parse_files(page)
-    q = pages.norm(arquivo)
-    found = [f for f in files if f["id"] == arquivo or pages.norm(f["titulo"]) == q] or [
-        f for f in files if q in pages.norm(f["titulo"])
-    ]
+    found = match(files)
+    if not found:
+        # Materiais anexados aos tópicos de aula nem sempre aparecem em Arquivos.
+        _, main = await courses.open_course(client, turma)
+        topic_files = [
+            {**m, "titulo": m["nome"]}
+            for t in parsers.parse_topics(main)
+            for m in t["materiais"]
+            if m["tipo"] == "arquivo"
+        ]
+        found = match(topic_files)
+        files += topic_files
     if not found:
         names = "; ".join(f["titulo"] for f in files) or "nenhum"
         raise SigaaError(f'Arquivo "{arquivo}" não encontrado. Arquivos: {names}.')
