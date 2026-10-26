@@ -702,12 +702,39 @@ async def _cli_keepalive() -> None:
         await client.aclose()
 
 
+async def _cli_moodle_login() -> int:
+    """Pede usuário e senha do Moodle no terminal e salva só o token."""
+    import getpass
+
+    from .moodle import MOODLE_URL, MoodleAuthError, MoodleClient
+
+    print(f"Login no Moodle ({MOODLE_URL}). A senha não é salva: só o token da API.")
+    moodle_client = MoodleClient()
+    try:
+        for attempt in range(3):
+            user = input("Usuário do Moodle: ").strip()
+            password = getpass.getpass("Senha do Moodle: ")
+            if not user or not password:
+                print("Login do Moodle pulado.")
+                return 0
+            try:
+                site = await moodle_client.login(user, password)
+                print(f"Token salvo. Logado como {site.get('fullname', user)}.")
+                return 0
+            except MoodleAuthError as e:
+                print(f"Falhou: {e}" + (" Tente de novo." if attempt < 2 else ""))
+        return 1
+    finally:
+        await moodle_client.aclose()
+
+
 USAGE = """uso: sigaa-mcp [comando]
 
   (sem comando)     roda o servidor MCP (stdio)
   cookie <valor>    salva o JSESSIONID de um login feito no navegador
-  login             abre o navegador para logar e captura o cookie
+  login             abre o navegador para logar no SIGAA e captura o cookie
   keepalive         mantém a sessão salva ativa enquanto estiver rodando
+  moodle-login      pede usuário e senha do Moodle e salva o token da API
   install-browser   baixa o Chromium usado pelo login por janela (fora do Windows)
 """
 
@@ -723,6 +750,8 @@ def main() -> None:
             asyncio.run(_cli_login())
         elif args[0] == "keepalive":
             asyncio.run(_cli_keepalive())
+        elif args[0] == "moodle-login":
+            sys.exit(asyncio.run(_cli_moodle_login()))
         elif args[0] == "install-browser":
             import subprocess
 
