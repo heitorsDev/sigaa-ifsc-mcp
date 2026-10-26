@@ -376,19 +376,24 @@ def parse_exam_calendar(page: Page) -> list[dict]:
 
 
 def parse_files(page: Page) -> list[dict]:
-    """Seção 'Arquivos' da turma: título, descrição e o formulário de download
-    (com `id` e `key`, que também servem para /sigaa/verFoto)."""
+    """Seção 'Arquivos' da turma (Título | Descrição | Tópico de Aula | ícone):
+    título, descrição, tópico e o formulário de download, com `id` e `key`.
+    O clique fica no ícone (img "Baixar Arquivo") ou num link, conforme a versão."""
     out = []
     for tr in page.soup.select(".listing tr[class]"):
         cells = tr.find_all("td", recursive=False)
         if not cells:
             continue
-        link = next((a for c in cells[1:] for a in c.find_all("a", onclick=True)), None)
+        link = next(
+            (el for c in cells[1:] for el in c.find_all(onclick=True) if "jsfcljs" in el["onclick"]),
+            None,
+        )
         form = _onclick_form(page, link)
         out.append(
             {
                 "titulo": clean(cells[0]),
                 "descricao": clean(cells[1]) if len(cells) > 1 else "",
+                "topico": clean(cells[2]) if len(cells) > 3 else "",
                 "id": form.values.get("id") if form else None,
                 "key": form.values.get("key") if form else None,
                 "form": form,
