@@ -5,6 +5,7 @@ Seletores e regras portados de sigaa-api (GeovaneSchmitz/sigaa-api, MIT).
 
 from __future__ import annotations
 
+import copy
 import re
 from urllib.parse import urljoin
 
@@ -400,6 +401,61 @@ def parse_files(page: Page) -> list[dict]:
             }
         )
     return out
+
+
+_ITEM_TYPES = {"pdf": "arquivo", "txt": "arquivo", "tarefa": "tarefa", "site_add": "link"}
+
+
+def parse_topics(page: Page) -> list[dict]:
+    """Tópicos de aula da página principal da turma (div.topico-aula), com os
+    materiais de cada um: arquivos, tarefas e links."""
+    topics = []
+    for div in page.soup.select("div.topico-aula"):
+        title = clean(div.select_one("div.titulo"))
+        dates = re.search(r"\((\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})\)", title)
+        body = div.select_one("div.conteudotopico")
+        items = []
+        for item in body.select("div.item") if body else []:
+            a = item.find("a")
+            if a is None:
+                continue
+            onclick = a.get("onclick", "")
+            form = _onclick_form(page, a) if "jsfcljs" in onclick else None
+            img = item.find("img")
+            icon = re.sub(r"\.\w+$", "", (img.get("src", "") if img else "").rsplit("/", 1)[-1])
+            if form and "idEnviarMaterialTarefa" in onclick:
+                kind = "tarefa"
+            elif form and form.values.get("key"):
+                kind = "arquivo"
+            elif a.get("href", "").startswith("http"):
+                kind = "link"
+            else:
+                kind = _ITEM_TYPES.get(icon, icon or "item")
+            items.append(
+                {
+                    "tipo": kind,
+                    "nome": clean(a),
+                    "descricao": clean(item.select_one("div.descricao-item")),
+                    "id": form.values.get("id") if form else None,
+                    "key": form.values.get("key") if form else None,
+                    "url": a["href"] if kind == "link" else None,
+                    "form": form,
+                }
+            )
+        text_body = copy.copy(body) if body is not None else None  # não altera a página
+        if text_body is not None:
+            for item in text_body.select("div.item"):
+                item.decompose()
+        topics.append(
+            {
+                "titulo": re.sub(r"\s*\(\d{2}/\d{2}/\d{4}\s*-\s*\d{2}/\d{2}/\d{4}\)", "", title),
+                "inicio": dates.group(1) if dates else "",
+                "fim": dates.group(2) if dates else "",
+                "conteudo": "\n".join(lines(text_body)),
+                "materiais": items,
+            }
+        )
+    return topics
 
 
 def strip_forms(items: list[dict]) -> list[dict]:
