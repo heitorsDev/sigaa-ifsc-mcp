@@ -438,9 +438,7 @@ def _file_result(name: str, data: bytes, ctype: str, folder: Path) -> str:
     path = documents.save(name, data, ctype, folder)
     info = _json({"arquivo": str(path), "tamanho_bytes": len(data), "tipo": ctype})
     if documents.is_pdf(data, ctype):
-        info += "
-
-" + documents.pdf_text(data, MAX_CHARS)
+        info += "\n\n" + documents.pdf_text(data, MAX_CHARS)
     return info
 
 
