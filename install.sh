@@ -41,6 +41,12 @@ main() {
   bin="$(uv tool dir --bin)/sigaa-mcp"
   [ -x "$bin" ] || die "sigaa-mcp não foi instalado em $bin."
 
+  # Verifica que o pacote instalado realmente importa e inicia.
+  if ! "$bin" --help </dev/null >/dev/null 2>&1; then
+    "$bin" --help </dev/null >&2 || true
+    die "sigaa-mcp foi instalado, mas falhou ao iniciar (veja o erro acima). Instalação abortada."
+  fi
+
   # 3. navegador do login por janela ----------------------------------------
   local browser="${SIGAA_BROWSER_PATH:-}"
   if [ -z "$browser" ]; then

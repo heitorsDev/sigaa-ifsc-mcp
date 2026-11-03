@@ -34,6 +34,13 @@
     $bin = Join-Path (uv tool dir --bin).Trim() 'sigaa-mcp.exe'
     if (-not (Test-Path $bin)) { throw "sigaa-mcp não foi instalado em $bin." }
 
+    # Verifica que o pacote instalado realmente importa e inicia.
+    & $bin --help *> $null
+    if ($LASTEXITCODE -ne 0) {
+        & $bin --help
+        throw 'sigaa-mcp foi instalado, mas falhou ao iniciar (veja o erro acima). Instalação abortada.'
+    }
+
     # 3. navegador: o login por janela usa o Edge, que já vem no Windows.
     $edge = @(
         "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",

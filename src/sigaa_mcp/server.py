@@ -769,6 +769,8 @@ def main() -> None:
             import subprocess
 
             sys.exit(subprocess.call([sys.executable, "-m", "playwright", "install", "chromium"]))
+        elif args[0] in ("-h", "--help", "help"):
+            print(USAGE)
         else:
             print(USAGE)
             sys.exit(2)
